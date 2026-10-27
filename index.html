@@ -2,146 +2,266 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="referrer" content="strict-origin-when-cross-origin">
-  <style>
-    body {
-      margin: 0;
-      background: transparent;
-      color: white;
-      font-family: Arial, sans-serif;
-    }
-    #panel {
-      display: none;
-      background: #181c24;
-      padding: 20px;
-      border-radius: 12px;
-      width: 640px;
-      margin: 40px auto;
-      text-align: center;
-    }
-    button {
-      padding: 12px 22px;
-      margin: 10px;
-      cursor: pointer;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+
+<style>
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: transparent !important;
+    font-family: Arial, sans-serif;
+    overflow: hidden;
+  }
+
+  #panel {
+    display: none;
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    width: 244px;
+    padding: 12px;
+    background: #171c25;
+    border: 1px solid #343c49;
+    border-radius: 12px;
+    color: white;
+    text-align: center;
+    box-shadow: 0 8px 25px #0008;
+  }
+
+  #title {
+    font-size: 13px;
+    font-weight: bold;
+    margin-bottom: 10px;
+  }
+
+  #holder, #ytplayer {
+    width: 220px;
+    height: 220px;
+  }
+
+  #status {
+    font-size: 11px;
+    color: #b8c1ce;
+    margin: 10px 0;
+  }
+
+  #play {
+    display: none;
+    background: #3279e7;
+    color: white;
+  }
+
+  button {
+    border: 0;
+    padding: 9px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin: 2px;
+  }
+</style>
 </head>
+
 <body>
-  <div id="panel">
-    <h2>Fake Sound — YouTube</h2>
-    <div id="holder"></div>
-    <p id="status">Loading...</p>
-    <button id="play">Play Sound</button>
-    <button id="close">Close</button>
-  </div>
+<div id="panel">
+  <div id="title">Fake Sound — YouTube</div>
+  <div id="holder"></div>
+  <div id="status">Loading...</div>
 
-  <script>
-    let player = null;
-    let apiReady = false;
-    let pending = null;
+  <button id="play">Play Sound</button>
+  <button id="close">Close</button>
+</div>
 
-    const panel = document.getElementById("panel");
-    const status = document.getElementById("status");
+<script>
+let player = null;
+let apiReady = false;
+let pending = null;
+let hasFocus = false;
+let session = 0;
+let fallbackTimer = null;
 
-    function openVideo(video, volume) {
-      panel.style.display = "block";
+const panel = document.getElementById("panel");
+const holder = document.getElementById("holder");
+const status = document.getElementById("status");
+const playButton = document.getElementById("play");
 
-      if (!apiReady) {
-        pending = { video, volume };
-        status.textContent = "Loading YouTube API...";
-        return;
+async function setGameFocus(focus) {
+  if (typeof GetParentResourceName !== "function") return;
+
+  if (hasFocus === focus) return;
+  hasFocus = focus;
+
+  try {
+    await fetch(
+      `https://${GetParentResourceName()}/fakeSoundFocus`,
+      {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({focus: focus})
       }
+    );
+  } catch (e) {
+    console.warn("NUI focus request failed:", e);
+  }
+}
 
-      if (player) {
-        player.destroy();
-        player = null;
-      }
+function showPlayButton() {
+  if (panel.style.display === "none") return;
+  playButton.style.display = "inline-block";
+  status.textContent = "Press Play to hear the sound";
+  setGameFocus(true);
+}
 
-      document.getElementById("holder").innerHTML =
-        '<div id="ytplayer"></div>';
+function closePlayer() {
+  session++;
 
-      player = new YT.Player("ytplayer", {
-        width: 640,
-        height: 360,
-        videoId: video,
-        playerVars: {
-          controls: 1,
-          playsinline: 1,
-          origin: location.origin
-        },
-        events: {
-          onReady: function (event) {
-            event.target.setVolume(volume);
-            status.textContent = "Ready — Press Play";
-          },
-          onStateChange: function (event) {
-            if (event.data === YT.PlayerState.PLAYING) {
-              status.textContent = "PLAYING";
-            }
-          },
-          onError: function (event) {
-            status.textContent = "YouTube Error: " + event.data;
-          },
-          onAutoplayBlocked: function () {
-            status.textContent = "AUTOPLAY BLOCKED";
-          }
-        }
-      });
-    }
+  if (fallbackTimer) {
+    clearTimeout(fallbackTimer);
+    fallbackTimer = null;
+  }
 
-    window.onYouTubeIframeAPIReady = function () {
-      apiReady = true;
-      if (pending) {
-        const p = pending;
-        pending = null;
-        openVideo(p.video, p.volume);
-      }
-    };
+  if (player) {
+    player.destroy();
+    player = null;
+  }
 
-    window.addEventListener("message", function (event) {
-      const data = event.data;
-      if (data.type === "playFakeSound") {
-        openVideo(data.video, data.volume);
-      }
-    });
+  holder.innerHTML = "";
+  panel.style.display = "none";
+  playButton.style.display = "none";
+  setGameFocus(false);
+}
 
-    document.getElementById("play").onclick = function () {
-      if (player && player.playVideo) {
-        player.playVideo();
-      }
-    };
+function openVideo(video, volume) {
+  if (!/^[a-zA-Z0-9_-]{11}$/.test(video)) return;
 
-    async function closePlayer() {
-      if (player && player.stopVideo) {
-        player.stopVideo();
-      }
-      panel.style.display = "none";
+  session++;
+  const currentSession = session;
 
-      if (typeof GetParentResourceName === "function") {
-        await fetch(
-          `https://${GetParentResourceName()}/closeFakeSound`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: "{}"
-          }
+  if (fallbackTimer) clearTimeout(fallbackTimer);
+
+  panel.style.display = "block";
+  playButton.style.display = "none";
+  status.textContent = "Loading YouTube...";
+
+  if (!apiReady) {
+    pending = {video, volume};
+    return;
+  }
+
+  if (player) {
+    player.destroy();
+    player = null;
+  }
+
+  holder.innerHTML = '<div id="ytplayer"></div>';
+
+  player = new YT.Player("ytplayer", {
+    width: 220,
+    height: 220,
+    videoId: video,
+    playerVars: {
+      autoplay: 1,
+      controls: 1,
+      playsinline: 1,
+      origin: location.origin
+    },
+    events: {
+      onReady: function(event) {
+        if (currentSession !== session) return;
+
+        event.target.setVolume(
+          Math.max(0, Math.min(Number(volume) || 50, 100))
         );
+
+        event.target.unMute();
+        event.target.playVideo();
+
+        status.textContent = "Starting...";
+
+        fallbackTimer = setTimeout(function() {
+          if (currentSession !== session) return;
+
+          if (
+            player &&
+            player.getPlayerState() !== YT.PlayerState.PLAYING
+          ) {
+            showPlayButton();
+          }
+        }, 4500);
+      },
+
+      onStateChange: function(event) {
+        if (currentSession !== session) return;
+
+        if (event.data === YT.PlayerState.PLAYING) {
+          status.textContent = "PLAYING";
+          playButton.style.display = "none";
+          setGameFocus(false);
+        }
+
+        if (event.data === YT.PlayerState.ENDED) {
+          closePlayer();
+        }
+      },
+
+      onAutoplayBlocked: function() {
+        if (currentSession !== session) return;
+        showPlayButton();
+      },
+
+      onError: function(event) {
+        if (currentSession !== session) return;
+        status.textContent = "YouTube error: " + event.data;
+        playButton.style.display = "none";
+        setGameFocus(true);
       }
     }
+  });
+}
 
-    document.getElementById("close").onclick = closePlayer;
+window.onYouTubeIframeAPIReady = function() {
+  apiReady = true;
 
-    document.addEventListener("keydown", function (event) {
-      if (event.key === "Escape") closePlayer();
-    });
+  if (pending) {
+    const data = pending;
+    pending = null;
+    openVideo(data.video, data.volume);
+  }
+};
 
-    const q = new URLSearchParams(location.search);
-    if (q.has("video")) {
-      openVideo(q.get("video"), Number(q.get("volume")) || 50);
-    }
-  </script>
+window.addEventListener("message", function(event) {
+  const data = event.data;
 
-  <script src="https://www.youtube.com/iframe_api"></script>
+  if (data && data.type === "playFakeSound") {
+    openVideo(data.video, data.volume);
+  }
+});
+
+playButton.onclick = function() {
+  if (!player) return;
+
+  player.unMute();
+  player.playVideo();
+};
+
+document.getElementById("close").onclick = closePlayer;
+
+document.addEventListener("keydown", function(event) {
+  if (event.key === "Escape") closePlayer();
+});
+
+// Allows testing directly in a browser.
+const params = new URLSearchParams(location.search);
+
+if (params.has("video")) {
+  openVideo(
+    params.get("video"),
+    Number(params.get("volume")) || 50
+  );
+}
+</script>
+
+<script src="https://www.youtube.com/iframe_api"></script>
 </body>
 </html>
