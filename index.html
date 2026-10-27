@@ -1,0 +1,147 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <style>
+    body {
+      margin: 0;
+      background: transparent;
+      color: white;
+      font-family: Arial, sans-serif;
+    }
+    #panel {
+      display: none;
+      background: #181c24;
+      padding: 20px;
+      border-radius: 12px;
+      width: 640px;
+      margin: 40px auto;
+      text-align: center;
+    }
+    button {
+      padding: 12px 22px;
+      margin: 10px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="panel">
+    <h2>Fake Sound — YouTube</h2>
+    <div id="holder"></div>
+    <p id="status">Loading...</p>
+    <button id="play">Play Sound</button>
+    <button id="close">Close</button>
+  </div>
+
+  <script>
+    let player = null;
+    let apiReady = false;
+    let pending = null;
+
+    const panel = document.getElementById("panel");
+    const status = document.getElementById("status");
+
+    function openVideo(video, volume) {
+      panel.style.display = "block";
+
+      if (!apiReady) {
+        pending = { video, volume };
+        status.textContent = "Loading YouTube API...";
+        return;
+      }
+
+      if (player) {
+        player.destroy();
+        player = null;
+      }
+
+      document.getElementById("holder").innerHTML =
+        '<div id="ytplayer"></div>';
+
+      player = new YT.Player("ytplayer", {
+        width: 640,
+        height: 360,
+        videoId: video,
+        playerVars: {
+          controls: 1,
+          playsinline: 1,
+          origin: location.origin
+        },
+        events: {
+          onReady: function (event) {
+            event.target.setVolume(volume);
+            status.textContent = "Ready — Press Play";
+          },
+          onStateChange: function (event) {
+            if (event.data === YT.PlayerState.PLAYING) {
+              status.textContent = "PLAYING";
+            }
+          },
+          onError: function (event) {
+            status.textContent = "YouTube Error: " + event.data;
+          },
+          onAutoplayBlocked: function () {
+            status.textContent = "AUTOPLAY BLOCKED";
+          }
+        }
+      });
+    }
+
+    window.onYouTubeIframeAPIReady = function () {
+      apiReady = true;
+      if (pending) {
+        const p = pending;
+        pending = null;
+        openVideo(p.video, p.volume);
+      }
+    };
+
+    window.addEventListener("message", function (event) {
+      const data = event.data;
+      if (data.type === "playFakeSound") {
+        openVideo(data.video, data.volume);
+      }
+    });
+
+    document.getElementById("play").onclick = function () {
+      if (player && player.playVideo) {
+        player.playVideo();
+      }
+    };
+
+    async function closePlayer() {
+      if (player && player.stopVideo) {
+        player.stopVideo();
+      }
+      panel.style.display = "none";
+
+      if (typeof GetParentResourceName === "function") {
+        await fetch(
+          `https://${GetParentResourceName()}/closeFakeSound`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: "{}"
+          }
+        );
+      }
+    }
+
+    document.getElementById("close").onclick = closePlayer;
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") closePlayer();
+    });
+
+    const q = new URLSearchParams(location.search);
+    if (q.has("video")) {
+      openVideo(q.get("video"), Number(q.get("volume")) || 50);
+    }
+  </script>
+
+  <script src="https://www.youtube.com/iframe_api"></script>
+</body>
+</html>
